@@ -1,0 +1,196 @@
+PHẦN 1 – PHÂN TÍCH LOGIC
+
+Trong quá trình xây dựng REST API cho hệ thống quản lý khách hàng, việc lựa chọn đúng HTTP Method là một yếu tố rất quan trọng. Mỗi phương thức HTTP trong REST được thiết kế với một mục đích riêng. Nếu sử dụng sai phương thức, hệ thống có thể gặp nhiều vấn đề như dữ liệu bị trùng lặp, khó bảo trì hoặc hoạt động không đúng chuẩn RESTful API.
+
+Trong đoạn code ban đầu, hệ thống sử dụng cùng một API:
+
+POST /api/customers
+
+để thực hiện cả hai chức năng:
+
+Tạo khách hàng mới
+Cập nhật thông tin khách hàng
+
+Ban đầu cách làm này có vẻ tiện lợi vì chỉ cần viết một API cho nhiều mục đích khác nhau. Tuy nhiên, khi triển khai thực tế, cách thiết kế này dễ gây ra lỗi nghiệp vụ và không phù hợp với nguyên tắc RESTful.
+
+1. Vấn đề khi sử dụng POST cho cả tạo mới và cập nhật
+
+Trong đoạn code cũ, hệ thống kiểm tra dữ liệu như sau:
+
+Nếu khách hàng chưa có id thì tạo mới.
+Nếu khách hàng đã có id thì tìm dữ liệu để cập nhật.
+Nếu không tìm thấy id thì hệ thống lại tạo thêm một khách hàng mới.
+
+Điều này dẫn đến nhiều vấn đề nguy hiểm trong thực tế.
+
+Ví dụ, người dùng muốn cập nhật khách hàng có id = 5. Tuy nhiên dữ liệu này đã bị xóa hoặc không tồn tại trong hệ thống. Thay vì thông báo lỗi rằng khách hàng không tồn tại, API lại tự động tạo thêm một bản ghi mới.
+
+Điều này làm cho dữ liệu bị sai logic nghiệp vụ vì thao tác “cập nhật” lại biến thành “tạo mới”.
+
+Ngoài ra, khi mạng chậm hoặc người dùng nhấn nút “Lưu” nhiều lần, client có thể gửi nhiều request POST giống nhau. Vì POST thường được hiểu là tạo mới tài nguyên nên server có thể sinh ra nhiều bản ghi trùng lặp.
+
+Ví dụ:
+
+POST /api/customers
+
+Body:
+
+{
+    "name": "An",
+    "email": "an@gmail.com"
+}
+
+Nếu request này được gửi nhiều lần thì hệ thống có thể tạo ra:
+
+Customer id = 1
+Customer id = 2
+Customer id = 3
+
+Mặc dù thông tin khách hàng hoàn toàn giống nhau.
+
+Kết quả là dữ liệu bị trùng lặp và thiếu nhất quán.
+
+2. Không đúng chuẩn RESTful API
+
+Trong RESTful API, mỗi HTTP Method đều có ý nghĩa riêng:
+
+GET dùng để lấy dữ liệu
+POST dùng để tạo dữ liệu mới
+PUT dùng để cập nhật dữ liệu
+DELETE dùng để xóa dữ liệu
+
+POST được thiết kế để tạo tài nguyên mới.
+
+PUT được thiết kế để cập nhật tài nguyên đã tồn tại.
+
+Do đó, việc sử dụng POST cho cả cập nhật làm cho API không còn rõ ràng về mặt ngữ nghĩa.
+
+Khi nhìn vào endpoint:
+
+POST /api/customers
+
+mọi người sẽ hiểu rằng API này dùng để tạo khách hàng mới chứ không phải cập nhật dữ liệu.
+
+Điều này gây ra nhiều khó khăn như:
+
+Frontend dễ gọi sai API
+Backend khó bảo trì
+Developer khác khó hiểu logic hệ thống
+Không tuân theo chuẩn RESTful phổ biến hiện nay
+3. Vấn đề về tính idempotent
+
+Một đặc điểm quan trọng của REST là tính idempotent.
+
+PUT là phương thức có tính idempotent, nghĩa là nếu gửi cùng một request nhiều lần thì kết quả cuối cùng trên server vẫn giống nhau.
+
+Ví dụ:
+
+PUT /api/customers/1
+
+Body:
+
+{
+    "name": "An Updated",
+    "email": "updated@gmail.com"
+}
+
+Dù request này được gửi:
+
+1 lần
+10 lần
+hoặc 100 lần
+
+thì dữ liệu cuối cùng vẫn chỉ là cập nhật customer có id = 1.
+
+Không tạo thêm dữ liệu mới.
+
+Trong khi đó POST không đảm bảo tính chất này. Nếu client retry request nhiều lần thì hệ thống có thể tạo thêm nhiều bản ghi giống nhau.
+
+Đây là lý do PUT phù hợp hơn cho thao tác cập nhật dữ liệu.
+
+4. Giải pháp đúng theo chuẩn REST
+
+Để hệ thống hoạt động chính xác và đúng chuẩn RESTful, cần tách riêng hai API khác nhau.
+
+API tạo khách hàng mới
+POST /api/customers
+
+API này có nhiệm vụ:
+
+Tạo khách hàng mới
+Server tự sinh id
+Trả về mã HTTP 201 CREATED
+
+POST chỉ dùng cho thao tác thêm dữ liệu mới.
+
+API cập nhật khách hàng
+PUT /api/customers/{id}
+
+API này có nhiệm vụ:
+
+Cập nhật khách hàng đã tồn tại
+id được truyền trên URL
+Nếu không tìm thấy khách hàng thì trả về mã 404 NOT FOUND
+
+PUT chỉ dùng cho thao tác chỉnh sửa dữ liệu hiện có.
+
+5. Lợi ích sau khi refactor
+
+Sau khi tách POST và PUT đúng chức năng, hệ thống sẽ có nhiều lợi ích quan trọng.
+
+Tránh trùng dữ liệu
+POST chỉ dùng để tạo mới
+PUT chỉ dùng để cập nhật
+
+Hệ thống sẽ không còn trường hợp cập nhật thất bại rồi tự động tạo thêm dữ liệu mới.
+
+API rõ ràng hơn
+
+Khi nhìn vào:
+
+POST /api/customers
+
+có thể hiểu ngay là API tạo mới khách hàng.
+
+Khi nhìn vào:
+
+PUT /api/customers/5
+
+có thể hiểu ngay là API cập nhật khách hàng có id = 5.
+
+Điều này giúp frontend và backend làm việc dễ dàng hơn.
+
+Đúng chuẩn RESTful API
+
+Việc sử dụng đúng HTTP Method giúp hệ thống:
+
+Dễ mở rộng
+Dễ bảo trì
+Dễ tích hợp với frontend hoặc mobile app
+Giúp developer khác dễ đọc hiểu code
+Đảm bảo tính idempotent
+
+Nếu client gửi lại request nhiều lần do timeout hoặc mạng chậm thì hệ thống vẫn an toàn.
+
+Ví dụ:
+
+PUT /api/customers/1
+
+sẽ chỉ cập nhật đúng customer đó thay vì tạo thêm dữ liệu mới.
+
+Điều này giúp dữ liệu ổn định và chính xác hơn.
+
+Kết luận
+
+Việc sử dụng POST cho cả tạo mới và cập nhật là không phù hợp trong thiết kế RESTful API vì có thể gây ra nhiều vấn đề như:
+
+Trùng dữ liệu
+Sai logic nghiệp vụ
+Khó bảo trì hệ thống
+Không đảm bảo tính idempotent
+
+Giải pháp đúng là tách riêng từng API theo đúng chức năng:
+
+POST /api/customers dùng để tạo khách hàng mới
+PUT /api/customers/{id} dùng để cập nhật khách hàng
+GET /api/customers/{id} dùng để lấy thông tin khách hàng
